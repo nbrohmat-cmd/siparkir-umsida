@@ -5,14 +5,16 @@
 
   SP.Pages.dashboard = {
     title: 'Dashboard',
-    sub: () => can.role('SUPERVISOR') ? 'Status shift lokasi tugas Anda' : can.role('RS_UMSIDA') ? 'Ringkasan transparansi untuk RS UMSIDA' : 'Panel kendali eksekutif operasional & keuangan',
+    sub: () => can.role('OPERATOR') ? 'Setoran pendapatan shift Anda per pos/gate' : can.role('SUPERVISOR') ? 'Status shift lokasi tugas Anda' : can.role('RS_UMSIDA') ? 'Ringkasan transparansi untuk RS UMSIDA' : 'Panel kendali eksekutif operasional & keuangan',
     prefetch() {
       if (can.role('SUPERVISOR')) API.prefetch('dash.supervisor', {}, { persist: true });
+      else if (can.role('OPERATOR')) API.prefetch('dash.operator', {}, { persist: true });
       else if (can.role('RS_UMSIDA')) API.prefetch('dash.rs', { periode: S.periode, lokasi: S.lokasi }, { persist: true });
       else API.prefetch('dash.internal', { periode: S.periode, lokasi: S.lokasi }, { persist: true });
     },
     render(el, p, ctx) {
       if (can.role('SUPERVISOR')) return renderSpv(el, ctx);
+      if (can.role('OPERATOR')) return renderOpr(el, ctx);
       if (can.role('RS_UMSIDA')) return renderRS(el, ctx);
       return renderInternal(el, ctx);
     }
@@ -112,11 +114,51 @@
           <div class="col-6 col-xl-3">${UI.kpi({ v: fmt.rps(k.pendapatan_shift), l: 'Pendapatan Shift Ini', c: 'hijau', i: 'fa-money-bill' })}</div>
           <div class="col-6 col-xl-3">${UI.kpi({ v: fmt.rp(k.selisih_hari), l: 'Selisih Kas Hari Ini', c: k.selisih_hari ? 'merah' : 'hijau', i: 'fa-scale-unbalanced' })}</div>
         </div>
+        ${setoranMenunggu(d.setoran_menunggu)}
         <a href="#/rekap?baru=1" class="btn btn-hijau w-100 btn-big mb-3 fs-5"><i class="fa-solid fa-square-plus"></i> REKAP SHIFT</a>
         ${UI.panel({ t: 'Status Rekap Hari Ini', i: 'fa-clock', body: grid(hari) })}
         ${UI.panel({ t: 'Status Rekap Kemarin', i: 'fa-clock-rotate-left', c: 'biru', body: grid(kemarin) })}
         <div class="row g-3"><div class="col-lg-6">${UI.panel({ t: 'Kuota Pengecualian Darurat (BR-18)', i: 'fa-truck-medical', c: 'merah', body: daruratSlots(d.gratis), foot: '<a href="#/gratis">Kelola darurat & pelanggaran →</a>' })}</div>
         <div class="col-lg-6">${UI.panel({ t: 'Rekap Terakhir Saya', i: 'fa-list', p0: true, body: d.terakhir.length ? `<table class="tbl"><tbody>${d.terakhir.map((r) => `<tr class="clickable" onclick="location.hash='#/rekap?id=${esc(r.id_rekap)}'"><td>${fmt.tgl(r.tanggal_operasi)}<div class="fs-11 muted">${esc(r.id_shift)} · ${esc(r.id_lokasi)}</div></td><td class="num">${fmt.rp(r.total_diterima)}</td><td class="text-end">${UI.badge(r.status)}</td></tr>`).join('')}</tbody></table>` : UI.empty() })}</div></div>`;
+    }
+  }
+  /** Supervisor: daftar setoran operator yang menunggu diterima */
+  function setoranMenunggu(list) {
+    if (!list || !list.length) return '';
+    const grup = {};
+    list.forEach((x) => { const k = x.tanggal_operasi + '|' + x.id_shift + '|' + x.id_lokasi; (grup[k] = grup[k] || []).push(x); });
+    return UI.panel({ t: `Setoran Operator Menunggu Diterima <span class="badge-s s-oranye">${list.length}</span>`, i: 'fa-hand-holding-dollar', c: 'oranye', p0: true,
+      body: `<table class="tbl"><tbody>${Object.keys(grup).map((k) => { const g = grup[k], x = g[0]; return `<tr class="clickable" onclick="location.hash='#/rekap?baru=1&tanggal=${esc(x.tanggal_operasi)}&shift=${esc(x.id_shift)}&lokasi=${esc(x.id_lokasi)}'">
+        <td>${fmt.tgl(x.tanggal_operasi)} · ${esc(x.id_shift)}<div class="fs-11 muted">${esc(namaLokasi(x.id_lokasi))} · ${g.map((y) => esc(y.nama_operator) + (y.pos ? ' (' + esc(y.pos) + ')' : '')).join(', ')}</div></td>
+        <td class="num">${fmt.rp(g.reduce((a, y) => a + (y.total_diterima || 0), 0))}</td><td class="text-end"><span class="btn btn-xs btn-oranye">Periksa</span></td></tr>`; }).join('')}</tbody></table>`,
+      foot: '<span class="fs-12">Terima setoran di formulir Rekap Shift — jumlahnya bisa langsung dipakai mengisi rekap.</span><a href="#/setoran">Semua setoran →</a>' });
+  }
+
+  // ================= OPERATOR =================
+  function renderOpr(el, ctx) {
+    el.innerHTML = UI.skKpi(4) + UI.skBox(1);
+    API.swr('dash.operator', {}, (d) => { if (ctx.live()) draw(d); }, { persist: true, onError: (e) => { el.innerHTML = UI.callout('fa-circle-xmark', esc(e.message), 'merah'); } });
+    function draw(d) {
+      const k = d.kpi, sa = d.shift_aktif;
+      const lbl = (x) => x.status === 'Belum Ada' ? 'Belum diinput' : x.status === 'Draft' ? 'Draft — belum diserahkan' : x.status === 'Diserahkan' ? 'Menunggu diterima Supervisor' : x.status === 'Diterima' ? 'Diterima Supervisor' : x.status === 'Direkap' ? 'Sudah masuk rekap shift' : x.status;
+      const grid = (arr) => `<div class="row g-2">${arr.map((x) => `<div class="col-md-6"><div class="mini ${x.status === 'Belum Ada' || x.status === 'Dikembalikan' ? 'l-merah' : x.status === 'Draft' || x.status === 'Diserahkan' ? 'l-oranye' : 'l-hijau'}">
+        <div class="d-flex justify-content-between"><div class="lb">${esc(x.nama_shift)} · ${esc(namaLokasi(x.id_lokasi))}</div>${UI.badge(x.status)}</div>
+        <div class="fs-13 mt-1">${esc(lbl(x))}${x.total ? ' · ' + fmt.rp(x.total) : ''}</div>
+        ${x.alasan ? `<div class="fs-12 text-merah">Dikembalikan: ${esc(x.alasan)}</div>` : ''}
+        <div class="mt-2">${x.status === 'Belum Ada' ? `<a class="btn btn-sm btn-hijau" href="#/setoran?baru=1&tanggal=${x.tanggal}&shift=${x.id_shift}&lokasi=${x.id_lokasi}"><i class="fa-solid fa-plus"></i> Input</a>` : (x.status === 'Draft' || x.status === 'Dikembalikan') ? `<a class="btn btn-sm btn-oranye" href="#/setoran?id=${x.id_setoran}"><i class="fa-solid fa-pen"></i> ${x.status === 'Draft' ? 'Lanjutkan' : 'Perbaiki'}</a>` : ''}</div></div></div>`).join('')}</div>`;
+      const hari = d.status.filter((x) => x.tanggal === SP.today()), kemarin = d.status.filter((x) => x.tanggal !== SP.today());
+      const baru = sa ? `#/setoran?baru=1&tanggal=${sa.tanggal}&shift=${sa.id_shift}` : '#/setoran?baru=1';
+      el.innerHTML = `${alertBanner(d.alerts)}
+        <div class="row g-3">
+          <div class="col-6 col-xl-3">${UI.kpi({ v: fmt.n(k.setoran_bulan), l: 'Setoran Bulan Ini', c: 'biru', i: 'fa-receipt', sub: sa ? 'Shift aktif: ' + sa.nama + ' ' + sa.jam_mulai + '–' + sa.jam_selesai : '' })}</div>
+          <div class="col-6 col-xl-3">${UI.kpi({ v: fmt.rps(k.total_bulan), l: 'Pendapatan Bulan Ini', c: 'hijau', i: 'fa-money-bill' })}</div>
+          <div class="col-6 col-xl-3">${UI.kpi({ v: fmt.n(k.menunggu), l: 'Menunggu Diterima', c: k.menunggu ? 'oranye' : 'hijau', i: 'fa-hourglass-half' })}</div>
+          <div class="col-6 col-xl-3">${UI.kpi({ v: fmt.n(k.dikembalikan), l: 'Perlu Diperbaiki', c: k.dikembalikan ? 'merah' : 'hijau', i: 'fa-rotate-left' })}</div>
+        </div>
+        <a href="${baru}" class="btn btn-hijau w-100 btn-big mb-3 fs-5"><i class="fa-solid fa-square-plus"></i> INPUT SETORAN SHIFT</a>
+        ${UI.panel({ t: 'Setoran Hari Ini', i: 'fa-clock', body: grid(hari) })}
+        ${UI.panel({ t: 'Setoran Kemarin', i: 'fa-clock-rotate-left', c: 'biru', body: grid(kemarin) })}
+        ${UI.panel({ t: 'Setoran Terakhir Saya', i: 'fa-list', p0: true, body: d.terakhir.length ? `<table class="tbl"><tbody>${d.terakhir.map((r) => `<tr class="clickable" onclick="location.hash='#/setoran?id=${esc(r.id_setoran)}'"><td>${fmt.tgl(r.tanggal_operasi)}<div class="fs-11 muted">${esc(r.id_shift)} · ${esc(r.id_lokasi)}${r.pos ? ' · ' + esc(r.pos) : ''}</div></td><td class="num">${fmt.rp(r.total_diterima)}</td><td class="text-end">${UI.badge(r.status)}</td></tr>`).join('')}</tbody></table>` : UI.empty('Belum ada setoran'), foot: '<a href="#/setoran">Semua riwayat setoran →</a>' })}`;
     }
   }
   function daruratSlots(g) {

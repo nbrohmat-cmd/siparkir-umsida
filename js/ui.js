@@ -22,7 +22,8 @@
   const ST = { Draft: 'abu', Diajukan: 'biru', Menunggu: 'oranye', Diverifikasi: 'hijau', Disetujui: 'hijau', Dibayar: 'hijau', Lunas: 'hijau', Terbit: 'biru', 'BA Dikonfirmasi': 'hijau', Ditinjau: 'oranye',
     Ditolak: 'merah', Terkunci: 'hitam', Aktif: 'hijau', Nonaktif: 'abu', Kedaluwarsa: 'merah', Selesai: 'hijau', Terbuka: 'oranye', Dilaporkan: 'oranye', 'Dokumen Lengkap': 'biru', Appraisal: 'aqua',
     Diputuskan: 'biru', 'BA Penyelesaian': 'ungu', Berhasil: 'hijau', Dibatalkan: 'abu', Gagal: 'merah', PENDING: 'oranye', SENT: 'hijau', FAILED: 'merah', SKIPPED: 'abu', 'Belum Cocok': 'oranye', Cocok: 'hijau',
-    Diabaikan: 'abu', 'Menunggu Pemicu': 'abu', 'Belum Ada': 'merah', 'Sudah Setor': 'biru', 'Sudah Lapor': 'hijau', 'Belum Setor': 'oranye', Berjalan: 'aqua', Prospek: 'biru', Negosiasi: 'oranye', Deal: 'hijau', Batal: 'abu' };
+    Diabaikan: 'abu', 'Menunggu Pemicu': 'abu', 'Belum Ada': 'merah', 'Sudah Setor': 'biru', 'Sudah Lapor': 'hijau', 'Belum Setor': 'oranye', Berjalan: 'aqua', Prospek: 'biru', Negosiasi: 'oranye', Deal: 'hijau', Batal: 'abu',
+    Diserahkan: 'oranye', Diterima: 'biru', Direkap: 'hijau', Dikembalikan: 'merah' };
   UI.badge = (s, c) => s === undefined || s === null || s === '' ? '' : `<span class="badge-s s-${c || ST[s] || 'abu'}">${esc(s)}</span>`;
   UI.callout = (t, html, c, aksi) => `<div class="callout ${c ? 'c-' + c : ''}"><i class="fa-solid ${t}"></i><div class="flex-fill">${html}</div>${aksi || ''}</div>`;
   UI.empty = (m) => `<div class="empty"><i class="fa-regular fa-folder-open fa-2x mb-2 d-block"></i>${esc(m || 'Belum ada data')}</div>`;

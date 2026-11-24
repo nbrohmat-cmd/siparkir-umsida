@@ -2,7 +2,7 @@
    - Berkas statis: stale-while-revalidate (tampil seketika dari cache, diperbarui di belakang)
    - Permintaan ke Google Apps Script (API) TIDAK pernah di-cache oleh SW (data ditangani cache aplikasi)
    Naikkan VERSI setiap kali merilis kode frontend baru. */
-const VERSI = 'siparkir-v1.0.0';
+const VERSI = 'siparkir-v1.1.0';
 const SHELL = [
   './', './index.html', './manifest.json', './css/app.css',
   './js/config.js', './js/core.js', './js/ui.js', './js/doc.js', './js/app.js',

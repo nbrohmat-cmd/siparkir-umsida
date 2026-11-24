@@ -6,7 +6,8 @@
     ['trx_berbayar', 'Trx Berbayar', 'fa-ticket'], ['trx_gratis', 'Civitas / Nakes (gratis)', 'fa-id-card'], ['trx_menginap', 'Menginap', 'fa-moon'], ['trx_darurat', 'Pengecualian Darurat', 'fa-truck-medical'],
     ['tiket_hilang', 'Tiket Hilang', 'fa-ticket-simple'], ['trx_pelanggaran_zonasi', 'Pelanggaran Zonasi', 'fa-ban'], ['kendaraan_kedaruratan', 'Kendaraan Kedaruratan', 'fa-truck-medical']];
   const UANG = [['pend_parkir', 'Pendapatan parkir reguler'], ['pend_menginap', 'Inap (menginap)'], ['denda_tiket_hilang', 'Denda tiket hilang'], ['pend_tarif_zonasi', 'Tarif sanksi zonasi']];
-  const lokasiSaya = () => master('lokasi').filter((l) => l.aktif === true && (!can.role('SUPERVISOR') || S.user.lokasi.indexOf(l.id_lokasi) > -1));
+  const lokasiSaya = () => master('lokasi').filter((l) => l.aktif === true && (!can.lap() || S.user.lokasi.indexOf(l.id_lokasi) > -1));
+  const shiftSekarang = () => { const now = nowLocal().slice(11, 16); const s = master('shift').find((x) => x.aktif !== false && (x.jam_mulai < x.jam_selesai ? now >= x.jam_mulai && now < x.jam_selesai : now >= x.jam_mulai || now < x.jam_selesai)); return s ? s.id_shift : ((master('shift')[0] || {}).id_shift || ''); };
 
   // =====================================================================
   //  REKAP SHIFT
@@ -79,7 +80,7 @@
         <div class="col-md-8"><label class="form-label">Pilihan jam kerja shift</label><div class="row g-2">${master('shift').filter((s) => s.aktif !== false).map((s) => `<div class="col-6"><div class="opt-card ${r.id_shift === s.id_shift ? 'on' : ''}" data-shift="${esc(s.id_shift)}"><b>${esc(s.nama)}</b><div class="fs-12">${esc(s.jam_mulai)} – ${esc(s.jam_selesai)} WIB</div></div></div>`).join('')}</div></div>
         <div class="col-12"><label class="form-label">Lokasi penugasan</label><select class="form-select" data-k="id_lokasi" ${lok.length === 1 ? 'disabled' : ''}>${lok.map((l) => `<option value="${esc(l.id_lokasi)}" ${l.id_lokasi === r.id_lokasi ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}</select></div></div>`)}
       ${step(2, 'Volume Kendaraan & Trafik', 'fa-car', `<div class="row g-2">${VOL.map((v) => num(v[0], v[1], v[2])).join('')}</div>`, '<span class="tag" data-totken></span>')}
-      ${step(3, 'Rincian Keuangan & Kas', 'fa-money-bill-wave', `<div class="row g-2">${UANG.map((u) => rpIn(u[0], u[1])).join('')}</div>
+      ${step(3, 'Rincian Keuangan & Kas', 'fa-money-bill-wave', `<div data-opr></div><div class="row g-2">${UANG.map((u) => rpIn(u[0], u[1])).join('')}</div>
         <div class="big-total my-3"><div class="fs-12 fw-600">TOTAL DITERIMA (PPK SHIFT)</div><div class="v" data-total>Rp0</div><i class="fa-solid fa-sack-dollar"></i></div>
         <div class="d-flex justify-content-between align-items-center"><b class="fs-13">METODE PEMBAYARAN</b><span data-cocok></span></div>
         <div class="row g-2 mt-1">${rpIn('tunai', 'Tunai (cash)')}${rpIn('qris', 'QRIS (non-tunai)')}</div>
@@ -107,14 +108,56 @@
       $('[data-catreq]', el).textContent = sel !== 0 ? '* wajib karena ada selisih' : '';
       const st = $('.stepper', el), filled = [true, get('masuk_mobil') + get('masuk_motor') > 0, tot > 0 && tot === tun + qr, !!r.foto_bukti || tun === 0];
       if (st) st.outerHTML = UI.stepper([{ nm: 'Identitas' }, { nm: 'Volume' }, { nm: 'Uang & Kas' }, { nm: 'Bukti & Tim' }], filled.indexOf(false) === -1 ? 4 : filled.indexOf(false));
+      cekOpr(tot, tun, qr);
       return { tot, tun, qr, sel };
     }
+    // ---- setoran operator (per pos/gate) yang digabung ke rekap ini ----
+    const oprBox = $('[data-opr]', el), bisaPeriksa = can.role('SUPERVISOR', 'ADMIN_KEU', 'SUPER_ADMIN') && !S.viewAs;
+    let opr = null, oprKey = '';
+    async function muatSetoran() {
+      const key = { tanggal_operasi: get('tanggal_operasi'), id_shift: r.id_shift, id_lokasi: get('id_lokasi') || r.id_lokasi, id_rekap: r.id_rekap || '' };
+      if (!key.tanggal_operasi || !key.id_shift || !key.id_lokasi) return;
+      const k = JSON.stringify(key); oprKey = k;
+      try { const d = await API.get('setoran.shift', key, { ttl: 0 }); if (!ctx.live() || oprKey !== k) return; opr = d; } catch (e) { opr = null; }
+      drawOpr(); hitung();
+    }
+    function drawOpr() {
+      if (!opr || !opr.rows.length) { opr = opr && opr.rows.length ? opr : null; oprBox.innerHTML = can.role('SUPERVISOR') ? '<div class="fs-12 muted mb-2"><i class="fa-solid fa-hand-holding-dollar"></i> Belum ada setoran operator untuk shift & lokasi ini — isi rekap secara manual.</div>' : ''; return; }
+      const j = opr.jumlah;
+      oprBox.innerHTML = `<div class="mini l-biru mb-3"><div class="d-flex justify-content-between align-items-center flex-wrap gap-2"><b class="fs-13"><i class="fa-solid fa-hand-holding-dollar"></i> SETORAN OPERATOR PER POS (${opr.rows.length})</b>${opr.menunggu ? `<span class="badge-s s-oranye">${opr.menunggu} menunggu diterima</span>` : ''}</div>
+        <div class="tbl-wrap mt-1"><table class="tbl fs-13"><thead><tr><th>Operator / pos</th><th class="num">Total</th><th class="num">Tunai</th><th class="num">QRIS</th><th class="num">Diserahkan</th><th>Status</th></tr></thead><tbody>
+        ${opr.rows.map((x) => `<tr><td><b>${esc(x.nama_operator)}</b><div class="fs-11 muted">${esc(x.pos || '-')} · ${fmt.n(x.trx_berbayar)} trx</div>${x.catatan ? `<div class="fs-11"><i class="fa-solid fa-comment muted"></i> ${esc(x.catatan)}</div>` : ''}${x.alasan_kembali ? `<div class="fs-11 text-merah">Dikembalikan: ${esc(x.alasan_kembali)}</div>` : ''}</td>
+          <td class="num">${fmt.rp(x.total_diterima)}</td><td class="num">${fmt.rp(x.tunai)}</td><td class="num">${fmt.rp(x.qris)}</td><td class="num ${x.selisih_kas ? 'text-merah fw-600' : ''}">${fmt.rp(x.tunai_disetor)}</td><td>${UI.badge(x.status)}
+          <div class="d-flex gap-1 mt-1 flex-wrap">${x.foto_bukti ? `<button type="button" class="btn btn-xs btn-abu" data-view="${esc(x.foto_bukti)}" title="Foto bukti"><i class="fa-solid fa-image"></i></button> ` : ''}${bisaPeriksa && x.status === 'Diserahkan' ? `<button type="button" class="btn btn-xs btn-hijau" data-terima="${esc(x.id_setoran)}"><i class="fa-solid fa-check"></i> Terima</button> ` : ''}${bisaPeriksa && ['Diserahkan', 'Diterima'].indexOf(x.status) > -1 ? `<button type="button" class="btn btn-xs btn-merah" data-kembali="${esc(x.id_setoran)}" title="Kembalikan ke operator"><i class="fa-solid fa-rotate-left"></i></button>` : ''}</div></td></tr>`).join('')}
+        </tbody><tfoot><tr><td>Dihitung (${j.jumlah} diterima)</td><td class="num">${fmt.rp(j.total_diterima)}</td><td class="num">${fmt.rp(j.tunai)}</td><td class="num">${fmt.rp(j.qris)}</td><td class="num">${fmt.rp(j.tunai_disetor)}</td><td></td></tr></tfoot></table></div>
+        <div class="d-flex gap-2 mt-2 align-items-center flex-wrap"><button type="button" class="btn btn-sm btn-biru" data-isi-opr ${j.jumlah ? '' : 'disabled'}><i class="fa-solid fa-wand-magic-sparkles"></i> Isi dari setoran operator</button><span class="fs-12" data-opr-cek></span></div></div>`;
+    }
+    function cekOpr(tot, tun, qr) {
+      const c = $('[data-opr-cek]', el); if (!c || !opr || !opr.jumlah.jumlah) return;
+      const j = opr.jumlah, sama = tot === j.total_diterima && tun === j.tunai && qr === j.qris;
+      c.innerHTML = sama ? '<span class="text-hijau fw-600"><i class="fa-solid fa-circle-check"></i> Rekap sama dengan jumlah setoran operator</span>' : `<span class="text-merah fw-600"><i class="fa-solid fa-triangle-exclamation"></i> Berbeda ${fmt.rp(tot - j.total_diterima)} dari setoran operator — jelaskan di catatan</span>`;
+    }
+    function isiDariOpr() {
+      const j = opr.jumlah, set = (k, v) => { const i = el.querySelector(`[data-k="${k}"]`); if (i) i.value = i.classList.contains('money') ? fmt.n(v) : v; };
+      UANG.forEach((u) => set(u[0], j[u[0]])); ['tunai', 'qris', 'tunai_disetor'].forEach((k) => set(k, j[k])); set('trx_berbayar', j.trx_berbayar);
+      const cat = el.querySelector('[data-k="catatan"]'), cc = opr.rows.filter((x) => (x.status === 'Diterima' || x.status === 'Direkap') && x.catatan).map((x) => (x.pos || x.nama_operator) + ': ' + x.catatan);
+      if (cat && !cat.value.trim() && cc.length) cat.value = cc.join('; ');
+      hitung(); UI.toast('Rincian uang & trx berbayar diisi dari ' + j.jumlah + ' setoran operator');
+    }
+    oprBox.addEventListener('click', async (e) => {
+      const t = e.target.closest('[data-terima]'), k = e.target.closest('[data-kembali]');
+      if (e.target.closest('[data-isi-opr]')) return isiDariOpr();
+      if (t) { try { const x = await UI.run(t, () => API.call('setoran.periksa', { id: t.dataset.terima, aksi: 'terima' }), 'Setoran diterima'); if (x.info) UI.toast(x.info, 'warn'); muatSetoran(); } catch (z) { } }
+      if (k) { const c = await UI.confirm({ title: 'Kembalikan setoran ' + esc(k.dataset.kembali), msg: 'Setoran dikembalikan ke operator untuk diperbaiki.', danger: true, ok: 'Kembalikan', input: { label: 'Alasan (dikirim ke operator)', req: true } }); if (!c) return;
+        try { await UI.run(k, () => API.call('setoran.periksa', { id: k.dataset.kembali, aksi: 'kembalikan', alasan: c.nilai }), 'Setoran dikembalikan ke operator'); muatSetoran(); } catch (z) { } }
+    });
+    el.addEventListener('change', (e) => { const k = e.target.dataset && e.target.dataset.k; if (k === 'tanggal_operasi' || k === 'id_lokasi') muatSetoran(); });
     UI.bindForm(el);
     el.addEventListener('input', hitung);
     el.addEventListener('click', async (e) => {
       const inc = e.target.closest('[data-inc]'), dec = e.target.closest('[data-dec]'), sh = e.target.closest('[data-shift]'), vw = e.target.closest('[data-view]');
       if (inc || dec) { const k = (inc || dec).dataset[inc ? 'inc' : 'dec'], i = el.querySelector(`[data-k="${k}"]`); i.value = Math.max(0, (Number(i.value) || 0) + (inc ? 1 : -1)); hitung(); }
-      if (sh) { r.id_shift = sh.dataset.shift; $$('[data-shift]', el).forEach((x) => x.classList.toggle('on', x === sh)); }
+      if (sh) { r.id_shift = sh.dataset.shift; $$('[data-shift]', el).forEach((x) => x.classList.toggle('on', x === sh)); muatSetoran(); }
       if (vw) UI.viewFile(vw.dataset.view);
       if (e.target.closest('[data-foto]')) {
         const f = await Files.pick('image/*', 'environment'); if (!f) return;
@@ -135,6 +178,7 @@
       if ($('#swRefund').checked) { row.refund_jumlah = get('refund_jumlah'); row.refund_nilai = get('refund_nilai'); } else { row.refund_jumlah = 0; row.refund_nilai = 0; row.refund_ref = ''; }
       const h = hitung();
       if (ajukan) {
+        if (opr && opr.menunggu) return UI.toast('Masih ada ' + opr.menunggu + ' setoran operator yang belum diterima — terima atau kembalikan dulu', 'warn');
         if (h.tot !== h.tun + h.qr) return UI.toast('Total pendapatan harus sama dengan Tunai + QRIS', 'warn');
         if (h.tun > 0 && !r.foto_bukti) return UI.toast('Foto bukti setoran wajib bila ada uang tunai', 'warn');
         if (h.sel !== 0 && !row.catatan) return UI.toast('Isi catatan keterangan selisih kas', 'warn');
@@ -149,6 +193,185 @@
     };
     $('[data-draft]', el).onclick = (e) => simpan(false, e.currentTarget);
     $('[data-ajukan]', el).onclick = (e) => simpan(true, e.currentTarget);
+    hitung();
+    muatSetoran();
+  }
+
+  // =====================================================================
+  //  SETORAN OPERATOR — pendapatan shift per pos/gate → digabung ke rekap Supervisor
+  // =====================================================================
+  const UANG_OPR = [['pend_parkir', 'Parkir reguler'], ['pend_menginap', 'Inap (menginap)'], ['denda_tiket_hilang', 'Denda tiket hilang'], ['pend_tarif_zonasi', 'Sanksi zonasi']];
+  const ARTI_SETORAN = { Draft: 'Belum diserahkan — masih bisa diubah', Diserahkan: 'Menunggu diterima Supervisor', Diterima: 'Diterima Supervisor, menunggu digabung ke rekap shift',
+    Direkap: 'Sudah tergabung ke rekap shift', Dikembalikan: 'Dikembalikan Supervisor — perbaiki lalu serahkan ulang' };
+  SP.Pages.setoran = {
+    title: (p) => can.role('OPERATOR') && (p.baru || p.id) ? (p.id ? 'Setoran Shift' : 'Input Setoran Shift') : '',
+    sub: () => can.role('OPERATOR') ? 'Pendapatan shift Anda per pos/gate — diterima & digabung oleh Supervisor' : 'Setoran pendapatan operator per pos/gate yang digabung ke rekap shift',
+    prefetch() { API.prefetch('data.list', { ent: 'setoran', periode: S.periode, lokasi: S.lokasi }); },
+    render(el, p, ctx) {
+      if (can.role('OPERATOR') && (p.baru || p.id)) return formSetoran(el, p, ctx);
+      daftarSetoran(el, p);
+    }
+  };
+  const bisaPeriksaSetoran = () => can.role('SUPERVISOR', 'ADMIN_KEU', 'SUPER_ADMIN') && !S.viewAs;
+  async function periksaSetoran(aksi, r, btn, done) {
+    if (aksi === 'terima') {
+      try { const x = await UI.run(btn, () => API.call('setoran.periksa', { id: r.id_setoran, aksi: 'terima' }), 'Setoran ' + r.id_setoran + ' diterima'); if (x.info) UI.toast(x.info, 'warn'); SP.Cache.drop('dash.'); if (done) done(); } catch (e) { }
+      return;
+    }
+    const c = await UI.confirm({ title: 'Kembalikan setoran ' + esc(r.id_setoran), msg: `Setoran <b>${esc(r.nama_operator)}</b> (${esc(r.pos || '-')}) ${fmt.rp(r.total_diterima)} dikembalikan ke operator untuk diperbaiki.`, danger: true, ok: 'Kembalikan', input: { label: 'Alasan (dikirim ke operator)', req: true } });
+    if (!c) return;
+    try { await UI.run(btn, () => API.call('setoran.periksa', { id: r.id_setoran, aksi: 'kembalikan', alasan: c.nilai }), 'Setoran dikembalikan ke operator'); SP.Cache.drop('dash.'); if (done) done(); } catch (e) { }
+  }
+  function daftarSetoran(el, p) {
+    const opr = can.role('OPERATOR'), tab = opr ? 'semua' : (p.tab || 'tunggu');
+    el.innerHTML = (opr && !S.viewAs ? '<a class="btn btn-hijau mb-3" href="#/setoran?baru=1"><i class="fa-solid fa-plus"></i> Input Setoran Shift</a>' : '') +
+      (opr ? '' : UI.tabs([{ id: 'tunggu', t: 'Menunggu Diterima', i: 'fa-hourglass-half' }, { id: 'semua', t: 'Semua Setoran', i: 'fa-list' }], tab)) +
+      `<div data-k></div>${UI.panel({ t: (tab === 'tunggu' ? 'Setoran Menunggu Diterima · ' : 'Setoran — ' + fmt.per(S.periode) + ' · ') + namaLokasi(S.lokasi), i: 'fa-hand-holding-dollar', p0: true, body: '<div data-t></div>',
+        foot: opr ? '<span>Setoran yang sudah diserahkan dikunci. Bila Supervisor mengembalikan, perbaiki lalu serahkan ulang.</span>' : '<span>Setoran yang diterima otomatis dijumlahkan di formulir Rekap Shift (tombol "Isi dari setoran operator").</span>' })}`;
+    $$('[data-tab]', el).forEach((b) => b.onclick = () => Router.go('setoran', { tab: b.dataset.tab }));
+    const cols = [{ k: 'tanggal_operasi', l: 'Tanggal', t: 'tgl' }, { k: 'id_shift', l: 'Shift' }, { k: 'id_lokasi', l: 'Lokasi' }, { k: 'pos', l: 'Pos / Gate' }];
+    if (!opr) cols.push({ k: 'nama_operator', l: 'Operator' });
+    cols.push({ k: 'total_diterima', l: 'Total', t: 'rp', sum: true }, { k: 'tunai', l: 'Tunai', t: 'rp', sum: true }, { k: 'qris', l: 'QRIS', t: 'rp', sum: true },
+      { k: 'selisih_kas', l: 'Selisih', t: 'rp', f: (v) => v ? `<span class="text-merah fw-600">${fmt.rp(v)}</span>` : fmt.rp(0) }, { k: 'status', l: 'Status', t: 'badge' });
+    const ent = UI.entity($('[data-t]', el), 'setoran', {
+      params: () => tab === 'tunggu' ? { lokasi: S.lokasi, status: 'Diserahkan' } : { periode: S.periode, lokasi: S.lokasi }, size: 15, cols, excel: 'Setoran_Operator',
+      empty: tab === 'tunggu' ? 'Tidak ada setoran yang menunggu diterima' : 'Belum ada setoran',
+      rowCls: (r) => r.status === 'Dikembalikan' ? 'row-merah' : r.status === 'Diserahkan' ? 'row-oranye' : '',
+      extraActions: (r) => {
+        if (opr) return !S.viewAs && ['Draft', 'Dikembalikan'].indexOf(r.status) > -1 ? UI.btnAct('ubah', '', 'oranye', 'fa-pen', 'Ubah / serahkan') : '';
+        if (!bisaPeriksaSetoran()) return '';
+        return (r.status === 'Diserahkan' ? UI.btnAct('terima', 'Terima', 'hijau', 'fa-check') : '') + (['Diserahkan', 'Diterima'].indexOf(r.status) > -1 ? UI.btnAct('kembali', '', 'merah', 'fa-rotate-left', 'Kembalikan ke operator') : '');
+      },
+      onAct: (act, r, btn, load) => {
+        if (act === 'ubah') Router.go('setoran', { id: r.id_setoran });
+        if (act === 'terima' || act === 'kembali') periksaSetoran(act === 'terima' ? 'terima' : 'kembalikan', r, btn, () => load(true));
+      },
+      onClick: (r) => detailSetoran(r, () => ent && ent.load(true)),
+      onData: (rows) => {
+        const k = $('[data-k]', el); if (!k) return;
+        const sum = (f, st) => rows.filter((r) => !st || st.indexOf(r.status) > -1).reduce((a, r) => a + (Number(r[f]) || 0), 0);
+        k.innerHTML = `<div class="row g-2 mb-3">${[['Setoran', fmt.n(rows.length)], ['Menunggu diterima', fmt.n(rows.filter((r) => r.status === 'Diserahkan').length), 'oranye'],
+          ['Total diserahkan', fmt.rp(sum('total_diterima', ['Diserahkan', 'Diterima', 'Direkap'])), 'hijau'], [opr ? 'Perlu diperbaiki' : 'Dikembalikan', fmt.n(rows.filter((r) => r.status === 'Dikembalikan').length), 'merah']]
+          .map((x) => `<div class="col-6 col-lg-3">${UI.mini(x[0], x[1], x[2])}</div>`).join('')}</div>`;
+      }
+    });
+    if (p.id && !opr) API.get('data.get', { ent: 'setoran', id: p.id }, { ttl: 5000 }).then((r) => detailSetoran(r, () => ent && ent.load(true))).catch(UI.err);
+  }
+  function detailSetoran(r, done) {
+    const row = (l, v) => `<tr><td class="muted">${l}</td><td class="num">${v}</td></tr>`;
+    const periksa = bisaPeriksaSetoran() && ['Diserahkan', 'Diterima'].indexOf(r.status) > -1;
+    const ubah = can.role('OPERATOR') && !S.viewAs && ['Draft', 'Dikembalikan'].indexOf(r.status) > -1;
+    const m = UI.modal({ title: 'Setoran ' + esc(r.id_setoran), size: 'lg',
+      body: `<div class="d-flex justify-content-between flex-wrap gap-2 mb-2"><div><b>${fmt.tgl(r.tanggal_operasi)}</b> · ${esc(namaShift(r.id_shift))} · ${esc(namaLokasi(r.id_lokasi))}<div class="fs-12 muted">${esc(r.nama_operator)} · ${esc(r.pos || '-')}</div></div><div class="text-end">${UI.badge(r.status)}<div class="fs-11 muted">${esc(ARTI_SETORAN[r.status] || '')}</div></div></div>
+        ${r.alasan_kembali ? UI.callout('fa-rotate-left', '<b>Dikembalikan:</b> ' + esc(r.alasan_kembali), 'merah') : ''}
+        <div class="row g-3"><div class="col-md-6"><table class="tbl">${row('Trx berbayar', fmt.n(r.trx_berbayar))}${UANG_OPR.map((u) => row(u[1], fmt.rp(r[u[0]]))).join('')}${row('<b>Total pendapatan</b>', '<b>' + fmt.rp(r.total_diterima) + '</b>')}</table></div>
+        <div class="col-md-6"><table class="tbl">${row('Tunai', fmt.rp(r.tunai))}${row('QRIS', fmt.rp(r.qris))}${row('Tunai diserahkan', fmt.rp(r.tunai_disetor))}${row('Selisih tunai', `<span class="${r.selisih_kas ? 'text-merah fw-600' : ''}">${fmt.rp(r.selisih_kas)}</span>`)}</table></div></div>
+        ${r.catatan ? UI.callout('fa-comment', '<b>Catatan operator:</b> ' + esc(r.catatan), 'biru') : ''}
+        <div class="fs-12 muted">${r.waktu_serah ? 'Diserahkan ' + fmt.tglw(r.waktu_serah) : 'Belum diserahkan'}${r.diterima_oleh ? ' · ' + (r.status === 'Dikembalikan' ? 'Dikembalikan' : 'Diterima') + ' ' + esc(r.diterima_oleh) + ' ' + fmt.tglw(r.waktu_terima) : ''}${r.id_rekap ? ' · Rekap <b>' + esc(r.id_rekap) + '</b>' : ''}</div>
+        ${r.foto_bukti ? `<button class="btn btn-sm btn-biru mt-2" data-view="${esc(r.foto_bukti)}"><i class="fa-solid fa-image"></i> Lihat foto bukti</button>` : ''}`,
+      foot: `<button class="btn btn-abu" data-x>Tutup</button>${ubah ? '<a class="btn btn-oranye" href="#/setoran?id=' + esc(r.id_setoran) + '" data-x><i class="fa-solid fa-pen"></i> Ubah / serahkan</a>' : ''}${periksa ? `<button class="btn btn-merah" data-kembali><i class="fa-solid fa-rotate-left"></i> Kembalikan</button>${r.status === 'Diserahkan' ? '<button class="btn btn-hijau" data-terima><i class="fa-solid fa-check"></i> Terima Setoran</button>' : ''}` : ''}` });
+    m.el.addEventListener('click', (e) => {
+      const v = e.target.closest('[data-view]'); if (v) UI.viewFile(v.dataset.view);
+      const t = e.target.closest('[data-terima]'), k = e.target.closest('[data-kembali]');
+      if (t || k) periksaSetoran(t ? 'terima' : 'kembalikan', r, t || k, () => { m.close(); if (done) done(); });
+    });
+  }
+
+  // ---------- Formulir setoran operator (ponsel-first, isi cepat) ----------
+  async function formSetoran(el, p, ctx) {
+    const lok = lokasiSaya();
+    let r = { tanggal_operasi: p.tanggal || today(), id_shift: p.shift || shiftSekarang(), id_lokasi: p.lokasi || (lok[0] || {}).id_lokasi || '', pos: SP.LS.get('sp_pos', ''),
+      trx_berbayar: 0, tunai: 0, qris: 0, tunai_disetor: 0, foto_bukti: '', catatan: '' };
+    UANG_OPR.forEach((u) => r[u[0]] = 0);
+    if (p.id) {
+      el.innerHTML = UI.skBox(2);
+      try { r = await API.get('data.get', { ent: 'setoran', id: p.id }, { force: true }); } catch (e) { el.innerHTML = UI.callout('fa-circle-xmark', esc(e.message), 'merah'); return; }
+      if (!ctx.live()) return;
+      if (['Draft', 'Dikembalikan'].indexOf(r.status) === -1) {
+        el.innerHTML = UI.callout(r.status === 'Direkap' ? 'fa-circle-check' : 'fa-lock', `<b>Setoran ${esc(r.id_setoran)} berstatus ${esc(r.status)}.</b> ${esc(ARTI_SETORAN[r.status] || '')} — tidak dapat diubah lagi.`, r.status === 'Direkap' ? 'hijau' : 'biru') +
+          '<a class="btn btn-abu" href="#/setoran">Kembali ke riwayat</a> <button class="btn btn-biru" data-det><i class="fa-solid fa-eye"></i> Lihat rincian</button>';
+        $('[data-det]', el).onclick = () => detailSetoran(r);
+        return;
+      }
+    }
+    let ikutTunai = !r.id_setoran || r.tunai === r.pend_parkir + r.pend_menginap + r.denda_tiket_hilang + r.pend_tarif_zonasi - r.qris, ikutSetor = !r.id_setoran || r.tunai_disetor === r.tunai;
+    const step = (n, t, i, body, badge) => `<div class="panel" data-sec="${n}"><div class="panel-h"><h3 class="ttl"><i class="fa-solid ${i}"></i>${n}. ${t}</h3>${badge || ''}</div><div class="panel-b">${body}</div></div>`;
+    const rpIn = (k, l, sub) => `<div class="col-md-6"><label class="form-label fs-12">${l}</label><div class="input-group"><span class="input-group-text">Rp</span><input class="form-control money" inputmode="numeric" data-k="${k}" value="${fmt.n(r[k] || 0)}"></div>${sub ? `<div class="form-text">${sub}</div>` : ''}</div>`;
+    const LANGKAH = [{ nm: 'Shift & Pos' }, { nm: 'Pendapatan' }, { nm: 'Tunai / QRIS' }, { nm: 'Bukti' }];
+    el.innerHTML = `
+      ${r.status === 'Dikembalikan' ? UI.callout('fa-rotate-left', '<b>Dikembalikan Supervisor:</b> ' + esc(r.alasan_kembali || '') + '<br><span class="fs-12">Perbaiki data di bawah lalu tekan <b>Serahkan ke Supervisor</b> lagi.</span>', 'merah') : ''}
+      <div class="panel p-polos"><div class="panel-b p-1">${UI.stepper(LANGKAH, 0)}</div></div>
+      ${step(1, 'Shift & Pos Jaga', 'fa-id-badge', `<div class="row g-2"><div class="col-md-4"><label class="form-label">Tanggal operasional</label><input type="date" class="form-control" data-k="tanggal_operasi" value="${esc(r.tanggal_operasi)}" max="${today()}"><div class="form-text">Shift malam memakai tanggal mulai shift.</div></div>
+        <div class="col-md-8"><label class="form-label">Shift kerja</label><div class="row g-2">${master('shift').filter((x) => x.aktif !== false).map((x) => `<div class="col-6"><div class="opt-card ${r.id_shift === x.id_shift ? 'on' : ''}" data-shift="${esc(x.id_shift)}"><b>${esc(x.nama)}</b><div class="fs-12">${esc(x.jam_mulai)} – ${esc(x.jam_selesai)} WIB</div></div></div>`).join('')}</div></div>
+        <div class="col-md-6"><label class="form-label">Lokasi</label><select class="form-select" data-k="id_lokasi" ${lok.length === 1 ? 'disabled' : ''}>${lok.map((l) => `<option value="${esc(l.id_lokasi)}" ${l.id_lokasi === r.id_lokasi ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}</select></div>
+        <div class="col-md-6"><label class="form-label">Pos / gate jaga</label><input class="form-control" data-k="pos" value="${esc(r.pos || '')}" placeholder="mis. Gate Masuk 1" maxlength="60"></div></div>`)}
+      ${step(2, 'Pendapatan Shift di Pos Ini', 'fa-money-bill-wave', `<div class="row g-2"><div class="col-md-6"><label class="form-label fs-12"><i class="fa-solid fa-ticket muted"></i> Transaksi berbayar</label><div class="stepper-num"><button type="button" data-dec="trx_berbayar">−</button><input class="form-control" inputmode="numeric" data-k="trx_berbayar" value="${r.trx_berbayar || 0}"><button type="button" data-inc="trx_berbayar">+</button></div></div>
+        ${UANG_OPR.map((u) => rpIn(u[0], u[1])).join('')}</div>
+        <div class="big-total my-3"><div class="fs-12 fw-600">TOTAL PENDAPATAN POS INI</div><div class="v" data-total>Rp0</div><i class="fa-solid fa-sack-dollar"></i></div>`)}
+      ${step(3, 'Tunai & QRIS', 'fa-wallet', `<div class="d-flex justify-content-between align-items-center"><b class="fs-13">METODE PEMBAYARAN</b><span data-cocok></span></div>
+        <div class="row g-2 mt-1">${rpIn('qris', 'QRIS (non-tunai)', 'Lihat total QRIS di mesin / aplikasi')}${rpIn('tunai', 'Tunai (cash)', 'Terisi otomatis = total − QRIS')}</div>
+        <hr><div class="row g-2">${rpIn('tunai_disetor', 'Uang tunai yang diserahkan ke Supervisor', 'Hitung fisik uangnya')}<div class="col-md-6 d-flex align-items-end"><div data-selisih class="w-100"></div></div></div>`)}
+      ${step(4, 'Bukti & Catatan', 'fa-camera', `<label class="form-label">Foto bukti (uang tunai / struk rekap pos)</label><div class="d-flex gap-3 align-items-center flex-wrap"><img class="foto-prev ${r.foto_bukti ? '' : 'd-none'}" data-prev alt="Foto bukti">
+          <div><button type="button" class="btn btn-biru" data-foto><i class="fa-solid fa-camera"></i> ${r.foto_bukti ? 'Ganti foto' : 'Ambil / pilih foto'}</button>${r.foto_bukti ? ` <button type="button" class="btn btn-sm btn-abu" data-view="${esc(r.foto_bukti)}">Lihat</button>` : ''}<div class="fs-12 muted mt-1" data-fnm>${r.foto_bukti ? 'Foto tersimpan' : 'Wajib bila ada uang tunai · dikompres otomatis'}</div></div></div>
+        <label class="form-label mt-3">Catatan <span class="req" data-catreq></span></label><textarea class="form-control" rows="2" data-k="catatan" placeholder="mis. kurang uang kembalian Rp5.000">${esc(r.catatan || '')}</textarea>`)}
+      <div class="d-flex gap-2 justify-content-between sticky-bottom bg-white p-2 border rounded no-print" style="bottom:64px">
+        <a class="btn btn-abu" href="#/setoran">Batal</a><div class="d-flex gap-2"><button class="btn btn-garis" data-draft><i class="fa-solid fa-floppy-disk"></i> Draft</button><button class="btn btn-hijau" data-serah><i class="fa-solid fa-paper-plane"></i> Serahkan ke Supervisor</button></div></div>`;
+    const inp = (k) => el.querySelector(`[data-k="${k}"]`);
+    const get = (k) => { const i = inp(k); if (!i) return r[k]; return i.classList.contains('money') ? UI.parseRp(i.value) : (/^(tanggal_operasi|id_lokasi|pos|catatan)$/.test(k) ? i.value : Number(i.value) || 0); };
+    const setRp = (k, v) => { const i = inp(k); if (i) i.value = fmt.n(Math.max(0, v)); };
+    function hitung() {
+      const tot = UANG_OPR.reduce((a, u) => a + get(u[0]), 0);
+      if (ikutTunai) setRp('tunai', tot - get('qris'));
+      if (ikutSetor) setRp('tunai_disetor', get('tunai'));
+      const tun = get('tunai'), qr = get('qris'), sel = get('tunai_disetor') - tun;
+      $('[data-total]', el).textContent = fmt.rp(tot);
+      $('[data-cocok]', el).innerHTML = tot === tun + qr ? '<span class="text-hijau fw-600"><i class="fa-solid fa-circle-check"></i> COCOK</span>' : `<span class="text-merah fw-600"><i class="fa-solid fa-circle-xmark"></i> Selisih ${fmt.rp(tot - tun - qr)}</span>`;
+      $('[data-selisih]', el).innerHTML = sel === 0 ? '<div class="fs-12 text-hijau fw-600"><i class="fa-solid fa-circle-check"></i> Uang tunai pas</div>' : UI.callout('fa-triangle-exclamation', `<b>Selisih ${fmt.rp(sel)}</b> (${sel < 0 ? 'kurang' : 'lebih'}) — wajib diberi catatan.`, 'merah');
+      $('[data-catreq]', el).textContent = sel !== 0 ? '* wajib karena ada selisih' : '';
+      const st = $('.stepper', el), isi = [!!get('pos'), tot > 0, tot === tun + qr, !!r.foto_bukti || tun === 0];
+      if (st) st.outerHTML = UI.stepper(LANGKAH, isi.indexOf(false) === -1 ? 4 : isi.indexOf(false));
+      return { tot, tun, qr, sel };
+    }
+    UI.bindForm(el);
+    el.addEventListener('input', (e) => { const k = e.target.dataset && e.target.dataset.k; if (k === 'tunai') ikutTunai = false; if (k === 'tunai_disetor') ikutSetor = false; hitung(); });
+    el.addEventListener('click', async (e) => {
+      const inc = e.target.closest('[data-inc]'), dec = e.target.closest('[data-dec]'), sh = e.target.closest('[data-shift]');
+      if (inc || dec) { const i = inp((inc || dec).dataset[inc ? 'inc' : 'dec']); i.value = Math.max(0, (Number(i.value) || 0) + (inc ? 1 : -1)); hitung(); }
+      if (sh) { r.id_shift = sh.dataset.shift; $$('[data-shift]', el).forEach((x) => x.classList.toggle('on', x === sh)); }
+      if (e.target.closest('[data-foto]')) {
+        const f = await Files.pick('image/*', 'environment'); if (!f) return;
+        const btn = e.target.closest('[data-foto]');
+        await UI.run(btn, async () => {
+          const c = await Files.compress(f, 1280, 0.8);
+          const pv = $('[data-prev]', el); pv.src = c.preview; pv.classList.remove('d-none');
+          const up = await API.call('file.upload', { kategori: 'bukti', nama: 'operator_' + get('tanggal_operasi') + '_' + r.id_shift + '_' + (get('id_lokasi') || r.id_lokasi) + '_' + String(get('pos') || 'pos').replace(/[^A-Za-z0-9]+/g, '-') + '.jpg', mime: c.mime, data: c.data }, { keepCache: true });
+          r.foto_bukti = up.id; $('[data-fnm]', el).textContent = up.nama + ' · ' + Math.round(up.ukuran / 1024) + ' KB · berhasil diunggah'; hitung();
+        }, 'Foto bukti terunggah');
+      }
+    });
+    const simpan = async (serahkan, btn) => {
+      const row = { id_setoran: r.id_setoran || '', tanggal_operasi: get('tanggal_operasi'), id_shift: r.id_shift, id_lokasi: get('id_lokasi') || r.id_lokasi, pos: get('pos'), catatan: get('catatan'), foto_bukti: r.foto_bukti, trx_berbayar: get('trx_berbayar') };
+      UANG_OPR.forEach((u) => row[u[0]] = get(u[0])); ['tunai', 'qris', 'tunai_disetor'].forEach((k) => row[k] = get(k));
+      const h = hitung();
+      if (h.tot !== h.tun + h.qr) return UI.toast('Total pendapatan harus sama dengan Tunai + QRIS', 'warn');
+      if (serahkan) {
+        if (!row.pos) return UI.toast('Isi pos / gate jaga Anda', 'warn');
+        if (h.tot <= 0) return UI.toast('Isi pendapatan shift terlebih dahulu', 'warn');
+        if (h.tun > 0 && !r.foto_bukti) return UI.toast('Foto bukti uang tunai wajib diunggah', 'warn');
+        if (h.sel !== 0 && !row.catatan) return UI.toast('Isi catatan keterangan selisih tunai', 'warn');
+        const ok = await UI.confirm({ title: 'Serahkan setoran', msg: `Serahkan <b>${fmt.rp(h.tot)}</b> (tunai ${fmt.rp(h.tun)} · QRIS ${fmt.rp(h.qr)}) dari <b>${esc(row.pos)}</b> ke Supervisor?<div class="fs-12 muted mt-1">Setelah diserahkan, setoran terkunci sampai Supervisor menerima atau mengembalikannya.</div>`, ok: 'Serahkan' });
+        if (!ok) return;
+      }
+      try {
+        const res = await UI.run(btn, () => API.call('setoran.save', { row, serahkan }), serahkan ? 'Setoran diserahkan ke Supervisor' : 'Draft tersimpan');
+        if (res.info) UI.toast(res.info, 'warn');
+        if (row.pos) SP.LS.set('sp_pos', row.pos);
+        SP.Cache.drop('dash.'); SP.Cache.drop('data.list|');
+        Router.go('dashboard');
+      } catch (x) { }
+    };
+    $('[data-draft]', el).onclick = (e) => simpan(false, e.currentTarget);
+    $('[data-serah]', el).onclick = (e) => simpan(true, e.currentTarget);
     hitung();
   }
 

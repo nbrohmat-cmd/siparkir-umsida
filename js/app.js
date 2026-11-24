@@ -98,7 +98,7 @@
       b.vAs = S.viewAs || '';
       const beda = !S.boot || JSON.stringify(Object.assign({}, S.boot, { waktu: 0 })) !== JSON.stringify(Object.assign({}, b, { waktu: 0 }));
       S.boot = b; S.user = b.user; LS.set('sp_boot', b);
-      if (S.user.peran === 'SUPERVISOR' && S.lokasi !== 'SEMUA' && S.user.lokasi.indexOf(S.lokasi) === -1) S.lokasi = 'SEMUA';
+      if (SP.can.lap() && S.lokasi !== 'SEMUA' && S.user.lokasi.indexOf(S.lokasi) === -1) S.lokasi = 'SEMUA';
       if (beda || !cached) { shell(); render(); }
       prefetchAwal();
     } catch (e) {
@@ -111,14 +111,15 @@
     const u = S.user;
     if (u.peran === 'RS_UMSIDA') API.prefetch('dash.rs', { periode: S.periode, lokasi: S.lokasi }, { persist: true });
     else if (u.peran === 'SUPERVISOR') API.prefetch('dash.supervisor', {}, { persist: true });
+    else if (u.peran === 'OPERATOR') API.prefetch('dash.operator', {}, { persist: true });
     else API.prefetch('dash.internal', { periode: S.periode, lokasi: S.lokasi }, { persist: true });
     loadNotif();
     clearInterval(notifTimer); notifTimer = setInterval(() => { if (!document.hidden) loadNotif(); }, 120000);
   }
   function shell() {
     const u = S.user, b = S.boot, p = pub(), lg = logos();
-    const lokOpts = master('lokasi').filter((l) => l.aktif === true && (u.peran !== 'SUPERVISOR' || u.lokasi.indexOf(l.id_lokasi) > -1));
-    document.body.className = (LS.get('sp_mini', false) ? 'side-mini ' : '') + (u.peran === 'SUPERVISOR' ? 'has-bnav' : '');
+    const lokOpts = master('lokasi').filter((l) => l.aktif === true && (!SP.can.lap() || u.lokasi.indexOf(l.id_lokasi) > -1));
+    document.body.className = (LS.get('sp_mini', false) ? 'side-mini ' : '') + (SP.can.lap() ? 'has-bnav' : '');
     app.innerHTML = `
       <nav class="sp-nav">
         <a class="sp-brand" href="#/dashboard"><img data-logo-p class="${lg.pengelola ? '' : 'd-none'}" src="${lg.pengelola || ''}" alt=""><span class="bt">${brandHtml()}</span></a>
@@ -147,7 +148,9 @@
         <footer class="sp-foot"><span>Copyright © ${new Date().getFullYear()} — <b>${esc(p.nama || CONFIG.APP_NAME)}</b> · ${esc(p.pengelola || '')}</span><span><b>Versi</b> ${esc(b.versi || CONFIG.VERSION)}</span></footer>
       </main>
       ${u.peran === 'SUPERVISOR' ? `<nav class="bnav"><a href="#/dashboard" data-bn="dashboard"><i class="fa-solid fa-house"></i>Beranda</a><a href="#/rekap?baru=1" data-bn="rekap"><i class="fa-solid fa-square-plus"></i>Input Shift</a>
-        <a href="#/sla?catat=1" data-bn="sla"><i class="fa-solid fa-triangle-exclamation"></i>Log Kejadian</a><a href="#/gratis" data-bn="gratis"><i class="fa-solid fa-square-parking"></i>Gratis</a><a href="#/sandi" data-bn="sandi"><i class="fa-solid fa-user"></i>Akun</a></nav>` : ''}`;
+        <a href="#/sla?catat=1" data-bn="sla"><i class="fa-solid fa-triangle-exclamation"></i>Log Kejadian</a><a href="#/gratis" data-bn="gratis"><i class="fa-solid fa-square-parking"></i>Gratis</a><a href="#/sandi" data-bn="sandi"><i class="fa-solid fa-user"></i>Akun</a></nav>` : ''}
+      ${u.peran === 'OPERATOR' ? `<nav class="bnav"><a href="#/dashboard" data-bn="dashboard"><i class="fa-solid fa-house"></i>Beranda</a><a href="#/setoran?baru=1" data-bn="setoran-baru"><i class="fa-solid fa-square-plus"></i>Input Setoran</a>
+        <a href="#/setoran" data-bn="setoran"><i class="fa-solid fa-clock-rotate-left"></i>Riwayat</a><a href="#/sandi" data-bn="sandi"><i class="fa-solid fa-user"></i>Akun</a></nav>` : ''}`;
     if (installEvt) $$('[data-install]').forEach((x) => x.classList.remove('d-none'));
     // peristiwa shell
     $('[data-side]').onclick = () => { if (window.innerWidth < 768) document.body.classList.toggle('side-open'); else { document.body.classList.toggle('side-mini'); LS.set('sp_mini', document.body.classList.contains('side-mini')); } };
@@ -186,13 +189,14 @@
     const pg = Pages[pid], my = ++navId, el = $('#page');
     if (!el) return;
     $$('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === pid));
-    $$('[data-bn]').forEach((a) => a.classList.toggle('on', a.dataset.bn === pid));
+    const bk = (params.baru || params.id) && $(`[data-bn="${pid}-baru"]`) ? pid + '-baru' : pid;
+    $$('[data-bn]').forEach((a) => a.classList.toggle('on', a.dataset.bn === bk));
     const item = S.boot.menu.map((g) => g.items).flat().find((i) => i.id === pid);
     const judul = (pg.title && (typeof pg.title === 'function' ? pg.title(params) : pg.title)) || (item ? item.t : '');
     const sub = typeof pg.sub === 'function' ? pg.sub(params) : (pg.sub || '');
     document.title = judul + ' — ' + (pub().nama || 'SiParkir');
     el.innerHTML = `<div class="page-h"><h1>${esc(judul)}<small>${esc(sub)}</small></h1><div class="crumb"><a href="#/dashboard"><i class="fa-solid fa-house"></i> Beranda</a>${pid !== 'dashboard' ? ' / ' + esc(judul) : ''}</div></div>
-      <div class="mfilter no-print"><input type="month" class="form-control form-control-sm" value="${S.periode}" data-mper><select class="form-select form-select-sm" data-mlok><option value="SEMUA">Semua Lokasi</option>${master('lokasi').filter((l) => l.aktif === true && (S.user.peran !== 'SUPERVISOR' || S.user.lokasi.indexOf(l.id_lokasi) > -1)).map((l) => `<option value="${esc(l.id_lokasi)}" ${S.lokasi === l.id_lokasi ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}</select></div>
+      <div class="mfilter no-print"><input type="month" class="form-control form-control-sm" value="${S.periode}" data-mper><select class="form-select form-select-sm" data-mlok><option value="SEMUA">Semua Lokasi</option>${master('lokasi').filter((l) => l.aktif === true && (!SP.can.lap() || S.user.lokasi.indexOf(l.id_lokasi) > -1)).map((l) => `<option value="${esc(l.id_lokasi)}" ${S.lokasi === l.id_lokasi ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}</select></div>
       <div data-body></div>`;
     const mp = $('[data-mper]', el), ml = $('[data-mlok]', el);
     if (mp) mp.onchange = () => { if (!mp.value) return; S.periode = mp.value; sessionStorage.setItem('sp_per', S.periode); const g = $('[data-gper]'); if (g) g.value = S.periode; render(); };

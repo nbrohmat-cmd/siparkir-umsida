@@ -6,6 +6,18 @@
   // =====================================================================
   //  VERIFIKASI SETORAN — pencocokan 3 arah: fisik kasir vs impor gate vs mutasi bank
   // =====================================================================
+  /** Rincian setoran operator per pos yang tergabung ke rekap (untuk verifikasi Admin) */
+  function setoranOpr(list, r) {
+    if (!list || !list.length) return '';
+    const dih = list.filter((x) => x.status === 'Diterima' || (x.status === 'Direkap' && (!x.id_rekap || x.id_rekap === r.id_rekap)));
+    const sum = (k) => dih.reduce((a, x) => a + (Number(x[k]) || 0), 0), tot = sum('total_diterima');
+    return `<div class="fw-700 mb-1 mt-3"><i class="fa-solid fa-hand-holding-dollar text-hijau"></i> RINCIAN SETORAN OPERATOR PER POS (${list.length})</div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Operator · pos</th><th class="num">Trx</th><th class="num">Total</th><th class="num">Tunai</th><th class="num">QRIS</th><th class="num">Diserahkan</th><th>Status</th></tr></thead><tbody>
+      ${list.map((x) => `<tr><td><b>${esc(x.nama_operator)}</b> <span class="muted fs-12">${esc(x.pos || '-')}</span>${x.catatan ? `<div class="fs-11"><i class="fa-solid fa-comment muted"></i> ${esc(x.catatan)}</div>` : ''}</td><td class="num">${fmt.n(x.trx_berbayar)}</td><td class="num">${fmt.rp(x.total_diterima)}</td><td class="num">${fmt.rp(x.tunai)}</td><td class="num">${fmt.rp(x.qris)}</td><td class="num ${x.selisih_kas ? 'text-merah fw-600' : ''}">${fmt.rp(x.tunai_disetor)}</td><td>${UI.badge(x.status)}</td></tr>`).join('')}
+      </tbody><tfoot><tr><td>Jumlah dihitung (${dih.length})</td><td class="num">${fmt.n(sum('trx_berbayar'))}</td><td class="num">${fmt.rp(tot)}</td><td class="num">${fmt.rp(sum('tunai'))}</td><td class="num">${fmt.rp(sum('qris'))}</td><td class="num">${fmt.rp(sum('tunai_disetor'))}</td>
+      <td>${tot === Number(r.total_diterima) ? '<span class="text-hijau fw-600"><i class="fa-solid fa-check"></i> = rekap</span>' : `<span class="text-merah fw-600"><i class="fa-solid fa-triangle-exclamation"></i> ${fmt.rp(Number(r.total_diterima) - tot)}</span>`}</td></tr></tfoot></table></div>`;
+  }
+
   SP.Pages.verifikasi = {
     title: 'Verifikasi Setoran Shift', sub: 'Pencocokan 3 arah: fisik kasir vs gate elektronik vs mutasi bank',
     prefetch() { API.prefetch('rekap.antrean', { lokasi: S.lokasi, periode: S.periode }); },
@@ -57,6 +69,7 @@
             <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Komponen</th><th class="num">Input fisik (kasir)</th><th class="num">Impor gate (POS)</th><th class="num">Mutasi bank</th><th>Status audit</th></tr></thead><tbody>
             ${brs.map((x) => `<tr><td>${x[0]}</td><td class="num">${v(man, x[3] || x[1])}</td><td class="num">${v(imp, x[1])}</td><td class="num">${x[2] !== undefined ? fmt.rp(x[2]) : '<span class="muted">—</span>'}</td><td>${x[2] !== undefined && d.manual ? st(man[x[3] || x[1]], x[2] || null) : (d.manual && d.impor ? st(man[x[1]], imp[x[1]]) : '<span class="muted">—</span>')}</td></tr>`).join('')}
             </tbody><tfoot><tr><td>TOTAL PENDAPATAN (PPK SHIFT)</td><td class="num">${v(man, 'total_diterima')}</td><td class="num">${v(imp, 'total_diterima')}</td><td class="num">${fmt.rp(b.setoran_tunai + b.settlement_qris)}</td><td>${d.manual && d.impor ? st(man.total_diterima, imp.total_diterima) : ''}</td></tr></tfoot></table></div>
+            ${setoranOpr(d.setoran, r)}
             ${r.selisih_kas ? UI.callout('fa-scale-unbalanced', `<b>Selisih kas fisik: ${fmt.rp(r.selisih_kas)}</b> (disetor ${fmt.rp(r.tunai_disetor)} vs tunai − refund ${fmt.rp(r.tunai - r.refund_nilai)})`, 'merah') : ''}
             ${r.flag_selisih ? UI.callout('fa-flag', `<b>Flag selisih manual vs impor: ${fmt.rp(r.selisih_impor)}</b>. Wajib diberi catatan verifikator.`, 'merah') : ''}
             <div class="row g-3 mt-1"><div class="col-md-6"><div class="mini"><div class="lb mb-2">Bukti fisik & setoran</div>${r.foto_bukti ? `<div data-foto class="text-center"><div class="sk" style="height:140px"></div></div>` : '<span class="muted fs-13">Tidak ada foto (tanpa uang tunai)</span>'}

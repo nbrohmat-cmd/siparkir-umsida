@@ -181,7 +181,9 @@
     role: (...r) => S.user && r.indexOf(S.user.peran) > -1,
     int: () => can.role('SUPER_ADMIN', 'PIMPINAN', 'ADMIN_KEU'),
     ent: (n) => S.boot && S.boot.ent && S.boot.ent[n],
-    write: (n) => !!(S.boot && S.boot.ent[n] && S.boot.ent[n].w) && !S.viewAs
+    write: (n) => !!(S.boot && S.boot.ent[n] && S.boot.ent[n].w) && !S.viewAs,
+    /** peran lapangan: hanya melihat lokasi tugasnya sendiri */
+    lap: () => can.role('SUPERVISOR', 'OPERATOR')
   };
   const master = (k) => (S.boot && S.boot.master && S.boot.master[k]) || [];
   const namaLokasi = (id) => { const l = master('lokasi').find((x) => x.id_lokasi === id); return l ? l.nama : (id === 'SEMUA' ? 'Semua Lokasi' : id || '-'); };
