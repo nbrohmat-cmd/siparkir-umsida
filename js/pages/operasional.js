@@ -94,7 +94,7 @@
         <label class="form-label mt-3">Petugas jaga aktif</label><input class="form-control" data-k="petugas" value="${esc(r.petugas || '')}" placeholder="Nama petugas, pisahkan koma">
         <label class="form-label mt-3">Catatan operasional / keterangan selisih <span class="req" data-catreq></span></label><textarea class="form-control" rows="3" data-k="catatan">${esc(r.catatan || '')}</textarea>`)}
       ${UI.callout('fa-shield-halved', 'Data rekap tersinkron ke dashboard Pimpinan PT JMBM & Bagian Keuangan RS UMSIDA setelah diverifikasi.', 'hijau')}
-      <div class="d-flex gap-2 justify-content-between sticky-bottom bg-white p-2 border rounded no-print" style="bottom:${can.role('SUPERVISOR') ? '64px' : '0'}">
+      <div class="d-flex gap-2 justify-content-between sticky-bottom sb-bnav bg-white p-2 border rounded no-print">
         <a class="btn btn-abu" href="#/rekap">Batal</a><div class="d-flex gap-2"><button class="btn btn-garis" data-draft><i class="fa-solid fa-floppy-disk"></i> Simpan Draft</button><button class="btn btn-hijau" data-ajukan><i class="fa-solid fa-paper-plane"></i> Ajukan Rekap Shift</button></div></div>`;
     const get = (k) => { const i = el.querySelector(`[data-k="${k}"]`); if (!i) return r[k]; return i.classList.contains('money') ? UI.parseRp(i.value) : (/^(tanggal_operasi|id_lokasi|refund_ref|petugas|catatan)$/.test(k) ? i.value : Number(i.value) || 0); };
     function hitung() {
@@ -314,7 +314,7 @@
       ${step(4, 'Bukti & Catatan', 'fa-camera', `<label class="form-label">Foto bukti (uang tunai / struk rekap pos)</label><div class="d-flex gap-3 align-items-center flex-wrap"><img class="foto-prev ${r.foto_bukti ? '' : 'd-none'}" data-prev alt="Foto bukti">
           <div><button type="button" class="btn btn-biru" data-foto><i class="fa-solid fa-camera"></i> ${r.foto_bukti ? 'Ganti foto' : 'Ambil / pilih foto'}</button>${r.foto_bukti ? ` <button type="button" class="btn btn-sm btn-abu" data-view="${esc(r.foto_bukti)}">Lihat</button>` : ''}<div class="fs-12 muted mt-1" data-fnm>${r.foto_bukti ? 'Foto tersimpan' : 'Wajib bila ada uang tunai · dikompres otomatis'}</div></div></div>
         <label class="form-label mt-3">Catatan <span class="req" data-catreq></span></label><textarea class="form-control" rows="2" data-k="catatan" placeholder="mis. kurang uang kembalian Rp5.000">${esc(r.catatan || '')}</textarea>`)}
-      <div class="d-flex gap-2 justify-content-between sticky-bottom bg-white p-2 border rounded no-print" style="bottom:64px">
+      <div class="d-flex gap-2 justify-content-between sticky-bottom sb-bnav bg-white p-2 border rounded no-print">
         <a class="btn btn-abu" href="#/setoran">Batal</a><div class="d-flex gap-2"><button class="btn btn-garis" data-draft><i class="fa-solid fa-floppy-disk"></i> Draft</button><button class="btn btn-hijau" data-serah><i class="fa-solid fa-paper-plane"></i> Serahkan ke Supervisor</button></div></div>`;
     const inp = (k) => el.querySelector(`[data-k="${k}"]`);
     const get = (k) => { const i = inp(k); if (!i) return r[k]; return i.classList.contains('money') ? UI.parseRp(i.value) : (/^(tanggal_operasi|id_lokasi|pos|catatan)$/.test(k) ? i.value : Number(i.value) || 0); };
